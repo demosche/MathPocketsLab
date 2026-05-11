@@ -1,8 +1,7 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtCore
 from enum import Enum
-from numpy.typing import NDArray
 
 
 class BoundaryType(Enum):
@@ -11,97 +10,88 @@ class BoundaryType(Enum):
 
 
 class Wave1D:
-    def __init__(self, Nx: int, L: float, c: float, boundary: BoundaryType):
+    def __init__(self, Nx: int, L: float, c: float, boundary: BoundaryType) -> None:
         self.Nx = Nx
-        self.L = L
-        self.c = c
         self.boundary = boundary
+        self.x: np.ndarray = np.linspace(0, L, Nx)
 
-        self.x = np.linspace(0, L, Nx)
+        dx: float = L / Nx
+        dt: float = 0.4 * dx / c
+        self.r: float = (c * dt / dx) ** 2
 
-        dx = L / Nx
-        dt = 0.4 * dx / c
-        self.r = (c * dt / dx) ** 2
-
-
-        self.u = np.zeros(Nx)
-        self.u_prev = np.zeros(Nx)
+        self.u:      np.ndarray = np.zeros(Nx)
+        self.u_prev: np.ndarray = np.zeros(Nx)
+        self.u_next: np.ndarray = np.zeros(Nx)
 
         self.u[int(Nx * 0.2)] = 1.0
         self.u_prev[:] = self.u
 
-    def apply_boundary(self, u: NDArray[np.float64]) -> None:
-        if self.boundary == BoundaryType.FIXED:
-            u[0] = 0
-            u[-1] = 0
-        else:
-            u[0] = u[1]
-            u[-1] = u[-2]
+    def step(self, n: int = 1) -> None:
+        r, u, u_prev, u_next = self.r, self.u, self.u_prev, self.u_next
+        fixed: bool = self.boundary == BoundaryType.FIXED
 
-    def step(self) -> None:
-        u_next = np.zeros_like(self.u)
-
-        for i in range(1, self.Nx - 1):
-            u_next[i] = (
-                2 * self.u[i]
-                - self.u_prev[i]
-                + self.r * (self.u[i + 1] - 2 * self.u[i] + self.u[i - 1])
+        for _ in range(n):
+            u_next[1:-1] = (
+                2 * u[1:-1]
+                - u_prev[1:-1]
+                + r * (u[2:] - 2 * u[1:-1] + u[:-2])
             )
+            if fixed:
+                u_next[0] = 0.0
+                u_next[-1] = 0.0
+            else:
+                u_next[0]  = u_next[1]
+                u_next[-1] = u_next[-2]
 
-        self.apply_boundary(u_next)
+            u_prev, u = u, u_next
+            u_next = u_prev
 
-        self.u_prev = self.u.copy()
-        self.u = u_next
+        self.u, self.u_prev, self.u_next = u, u_prev, u_next
 
 
-def simulate():
-    Nx = 400
-    L = 1.0
-    c = 1.0
-    Nt = 800
-
-    fixed = Wave1D(Nx, L, c, BoundaryType.FIXED)
-    free = Wave1D(Nx, L, c, BoundaryType.FREE)
-
-    fig, ax = plt.subplots(3, 1, figsize=(8, 10))
-
-    line_f, = ax[0].plot(fixed.x, fixed.u)
-    ax[0].set_title("Fixed boundary")
-
-    line_fr, = ax[1].plot(free.x, free.u)
-    ax[1].set_title("Free boundary")
-
-    line_o1, = ax[2].plot(fixed.x, fixed.u, label="Fixed")
-    line_o2, = ax[2].plot(free.x, free.u, label="Free")
-    ax[2].legend()
-    ax[2].set_title("Overlay")
-
-    for a in ax:
-        a.set_ylim(-1.5, 1.5)
-
-    def update(_):
-        fixed.step()
-        free.step()
-
-        line_f.set_ydata(fixed.u)
-        line_fr.set_ydata(free.u)
-
-        line_o1.set_ydata(fixed.u)
-        line_o2.set_ydata(free.u)
-
-        return line_f, line_fr, line_o1, line_o2
-
-    animation_object= animation.FuncAnimation(
-        fig,
-        update,
-        frames=Nt,
-        interval=20,
-        blit=False
+def run() -> None:
+    pg.setConfigOptions(
+        useOpenGL=True,
+        antialias=False,
+        background="w",
+        foreground="k",
     )
 
-    plt.tight_layout()
-    plt.show()
+    app = pg.mkQApp()
+    win = pg.GraphicsLayoutWidget(show=True)
+    win.setWindowTitle("1D Wave Equation")
+
+    Nx: int = 400
+    fixed = Wave1D(Nx, 1.0, 1.0, BoundaryType.FIXED)
+    free  = Wave1D(Nx, 1.0, 1.0, BoundaryType.FREE)
+
+    p1 = win.addPlot(title="Fixed boundary")
+    win.nextRow()
+    p2 = win.addPlot(title="Free boundary")
+
+    for p in (p1, p2):
+        p.setYRange(-1.5, 1.5)
+        p.showGrid(x=True, y=True, alpha=0.3)
+        p.setDownsampling(auto=True, mode="peak")
+        p.setClipToView(True)
+
+    c1 = p1.plot(fixed.x, fixed.u, pen=pg.mkPen("b", width=2))
+    c2 = p2.plot(free.x,  free.u,  pen=pg.mkPen("g", width=2))
+
+    STEPS_PER_FRAME: int = 4
+
+    def update() -> None:
+        fixed.step(STEPS_PER_FRAME)
+        free.step(STEPS_PER_FRAME)
+        c1.setData(y=fixed.u)
+        c2.setData(y=free.u)
+
+    timer = QtCore.QTimer()
+    timer.timeout.connect(update)
+    timer.start(0)
+
+    pg.exec()
 
 
 if __name__ == "__main__":
-    simulate()
+    run()
