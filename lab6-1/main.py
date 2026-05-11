@@ -12,7 +12,7 @@ class HeatEquationConfig:
     alpha: float = 0.01      # Thermal diffusivity [m²/s]
     dt: float = 0.001        # Time step size [seconds]
     total_time: float = 10.0 # Total simulation duration [seconds]
-
+    steps_per_frame: int = 50 
 
 class HeatSolver1D:
     def __init__(self, config: HeatEquationConfig) -> None:
@@ -83,7 +83,15 @@ class HeatVisualizer(QtWidgets.QMainWindow):
         self.timer.start(10)  # Fire every 10 ms — targets ~100 FPS
 
     def refresh_plot(self) -> None:
-        self.solver.step()
+        for _ in range(self.solver.config.steps_per_frame):
+            if self.solver.elapsed_time >= self.solver.config.total_time:
+                self.timer.stop()
+                self.plot_widget.setTitle(
+                    f"1D Heat Diffusion — finished at t = {self.solver.config.total_time:.1f}s"
+                )
+                return
+            self.solver.step()
+
         self.curve.setData(self.solver.x, self.solver.u)
         self._update_title()
 
